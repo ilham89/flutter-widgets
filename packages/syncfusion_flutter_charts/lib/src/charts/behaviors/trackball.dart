@@ -43,6 +43,7 @@ class TrackballBehavior extends ChartBehavior {
     this.tooltipDisplayMode = TrackballDisplayMode.floatAllPoints,
     this.tooltipAlignment = ChartAlignment.center,
     this.tooltipSettings = const InteractiveTooltip(),
+    this.centerTooltipOnTrackLine = false,
     this.markerSettings,
     this.lineDashArray,
     this.enable = false,
@@ -255,6 +256,16 @@ class TrackballBehavior extends ChartBehavior {
   /// }
   /// ```
   final TrackballDisplayMode tooltipDisplayMode;
+
+  /// Centers the tooltip horizontally on the track line and places it
+  /// dynamically above or below the selected dot based on available space.
+  ///
+  /// When set to true, the tooltip will no longer be positioned to the
+  /// left/right of the track line. Useful for UIs that require the tooltip to
+  /// stay in the middle of the vertical guideline.
+  ///
+  /// Defaults to `false`.
+  final bool centerTooltipOnTrackLine;
 
   /// Shows or hides the trackball.
   ///
@@ -1259,11 +1270,15 @@ class TrackballBehavior extends ChartBehavior {
       arrowLength,
       arrowWidth,
     );
-    final Path nearestTooltipPath =
-        Path()
-          ..addRRect(tooltipRRect)
-          ..addPath(nosePath, Offset.zero);
-    _tooltipPaths.add(nearestTooltipPath);
+    if (arrowLength > 0 && arrowWidth > 0) {
+      final Path nearestTooltipPath =
+          Path()
+            ..addRRect(tooltipRRect)
+            ..addPath(nosePath, Offset.zero);
+      _tooltipPaths.add(nearestTooltipPath);
+    } else {
+      _tooltipPaths.add(Path()..addRRect(tooltipRRect));
+    }
 
     if (tooltipSettings.canShowMarker) {
       final Offset markerPosition = _markerPosition(
@@ -1390,11 +1405,15 @@ class TrackballBehavior extends ChartBehavior {
       arrowLength,
       arrowWidth,
     );
-    final Path nearestTooltipPath =
-        Path()
-          ..addRRect(tooltipRRect)
-          ..addPath(nosePath, Offset.zero);
-    _tooltipPaths.add(nearestTooltipPath);
+    if (arrowLength > 0 && arrowWidth > 0) {
+      final Path nearestTooltipPath =
+          Path()
+            ..addRRect(tooltipRRect)
+            ..addPath(nosePath, Offset.zero);
+      _tooltipPaths.add(nearestTooltipPath);
+    } else {
+      _tooltipPaths.add(Path()..addRRect(tooltipRRect));
+    }
 
     if (tooltipSettings.canShowMarker) {
       final Offset markerPosition = _markerPosition(
@@ -2049,6 +2068,93 @@ class TrackballBehavior extends ChartBehavior {
   ]) {
     double xPos = xPosition;
     double yPos = yPosition;
+
+    // Custom behavior: center tooltip on the track line.
+    if (centerTooltipOnTrackLine) {
+      if (_isTransposed) {
+        // For transposed charts, center vertically on the horizontal track line
+        // and place left/right dynamically based on space.
+        final double totalHeight = _plotAreaBounds.top + _plotAreaBounds.height;
+        final double halfRectHeight = rectHeight / 2;
+        yPos = yPosition - halfRectHeight;
+        if (yPos < _plotAreaBounds.top) {
+          yPos = _plotAreaBounds.top;
+        } else if ((yPosition + halfRectHeight) > totalHeight) {
+          yPos = totalHeight - rectHeight;
+        }
+
+        // Prefer placing to the right if space allows, else to the left.
+        final double rightCandidate = xPosition + padding + arrowLength;
+        final double leftCandidate = xPosition - rectWidth - padding - arrowLength;
+        if (rightCandidate + rectWidth <= _plotAreaBounds.right) {
+          xPos = rightCandidate;
+          _isRight = true;
+          _isLeft = false;
+        } else {
+          xPos = leftCandidate;
+          _isRight = false;
+          _isLeft = true;
+        }
+      } else {
+        // Normal chart: try to center horizontally on the vertical track line.
+        final double centeredLeft = xPosition - rectWidth / 2;
+        final bool fitsCentered = centeredLeft >= _plotAreaBounds.left &&
+            centeredLeft + rectWidth <= _plotAreaBounds.right;
+
+        if (fitsCentered) {
+          // Place above/below the dot based on space.
+          xPos = centeredLeft;
+          final double topCandidate =
+              yPosition - rectHeight - padding - arrowLength;
+          if (topCandidate >= _plotAreaBounds.top) {
+            yPos = topCandidate;
+            _isTop = true;
+          } else {
+            yPos = yPosition + padding + arrowLength;
+            _isTop = false;
+          }
+          // Clamp vertically inside plot area.
+          if (yPos < _plotAreaBounds.top) {
+            yPos = _plotAreaBounds.top;
+          }
+          if (yPos + rectHeight > _plotAreaBounds.bottom) {
+            yPos = _plotAreaBounds.bottom - rectHeight;
+          }
+          // Left/Right flags are irrelevant when centered; reset.
+          _isLeft = false;
+          _isRight = false;
+        } else {
+          // Fallback: show to the left/right of the line, vertically centered
+          // with the dot.
+          final double rightCandidate =
+              xPosition + padding + arrowLength; // x for right placement
+          final double leftCandidate =
+              xPosition - rectWidth - padding - arrowLength; // x for left
+
+          if (rightCandidate + rectWidth <= _plotAreaBounds.right) {
+            xPos = rightCandidate;
+            _isRight = true;
+            _isLeft = false;
+          } else {
+            xPos = leftCandidate;
+            _isRight = false;
+            _isLeft = true;
+            if (xPos < _plotAreaBounds.left) {
+              xPos = _plotAreaBounds.left; // last resort clamp
+            }
+          }
+
+          yPos = yPosition - rectHeight / 2; // center align with dot
+          if (yPos < _plotAreaBounds.top) {
+            yPos = _plotAreaBounds.top;
+          }
+          if (yPos + rectHeight > _plotAreaBounds.bottom) {
+            yPos = _plotAreaBounds.bottom - rectHeight;
+          }
+        }
+      }
+      return Offset(xPos, yPos);
+    }
     if (yPosition > arrowLength + rectHeight) {
       _isTop = true;
       _isRight = false;
@@ -3060,7 +3166,79 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
           }
         }
 
-        if (chartPointInfo != null &&
+        final bool centerOnLine = trackballBehavior.centerTooltipOnTrackLine;
+
+        if (centerOnLine && !isGroupAllPoints && !isTransposed) {
+          // Try centered placement first.
+          final double centeredLeft = xPos - templateHalfWidth;
+          final bool fitsCentered = centeredLeft >= boundaryLeft &&
+              centeredLeft + templateFullWidth <= boundaryRight;
+
+          if (fitsCentered) {
+            double topCandidate =
+                yPos - templateFullHeight - padding - markerHalfHeight;
+            double top = topCandidate >= plotAreaBounds.top
+                ? topCandidate
+                : yPos + padding + markerHalfHeight;
+            if (top + templateFullHeight > plotAreaBounds.bottom) {
+              top = plotAreaBounds.bottom - templateFullHeight;
+            }
+
+            trackballTemplateRect = Rect.fromLTWH(
+              centeredLeft,
+              top,
+              templateFullWidth,
+              templateFullHeight,
+            );
+
+            if (_isTemplateWithinBounds(plotAreaBounds, trackballTemplateRect!)) {
+              isTemplateInBounds = true;
+              childParentData.offset = Offset(centeredLeft, top);
+            } else {
+              child!.layout(
+                constraints.copyWith(maxWidth: 0),
+                parentUsesSize: true,
+              );
+              isTemplateInBounds = false;
+            }
+          } else {
+            // Fallback: show left/right of the line, vertically centered.
+            double left;
+            if (xPos + padding + markerHalfWidth + templateFullWidth <=
+                boundaryRight) {
+              left = xPos + padding + markerHalfWidth;
+            } else {
+              left = xPos - templateFullWidth - padding - markerHalfWidth;
+              if (left < boundaryLeft) {
+                left = boundaryLeft;
+              }
+            }
+
+            double top = yPos - templateHalfHeight; // center with dot
+            if (top < plotAreaBounds.top) {
+              top = plotAreaBounds.top;
+            } else if (top + templateFullHeight > plotAreaBounds.bottom) {
+              top = plotAreaBounds.bottom - templateFullHeight;
+            }
+
+            trackballTemplateRect = Rect.fromLTWH(
+              left,
+              top,
+              templateFullWidth,
+              templateFullHeight,
+            );
+            if (_isTemplateWithinBounds(plotAreaBounds, trackballTemplateRect!)) {
+              isTemplateInBounds = true;
+              childParentData.offset = Offset(left, top);
+            } else {
+              child!.layout(
+                constraints.copyWith(maxWidth: 0),
+                parentUsesSize: true,
+              );
+              isTemplateInBounds = false;
+            }
+          }
+        } else if (chartPointInfo != null &&
             chartPointInfo!.isNotEmpty &&
             !isGroupAllPoints) {
           final int length = chartPointInfo!.length;
@@ -3406,32 +3584,61 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
         );
 
         String nosePosition = '';
-        if (!isTransposed) {
-          if (!isRight) {
+        if (trackballBehavior.centerTooltipOnTrackLine) {
+          // Choose nearest side of the tooltip rect to the dot position.
+          // Use same coordinate space as templateRRect (paint offset applied).
+          final Offset dot = Offset(offset.dx + xPos, offset.dy + yPos);
+          final double dLeft = (dot.dx - templateRRect.left).abs();
+          final double dRight = (templateRRect.right - dot.dx).abs();
+          final double dTop = (dot.dy - templateRRect.top).abs();
+          final double dBottom = (templateRRect.bottom - dot.dy).abs();
+          final double minDist = [dLeft, dRight, dTop, dBottom]
+              .reduce((a, b) => a < b ? a : b);
+          // Map nearest side to Syncfusion's internal labels where
+          // 'Right' draws nose on left edge and 'Left' draws on right edge.
+          if (minDist == dLeft) {
+            // Left edge nearest -> draw nose on left edge => label 'Right'
             nosePosition = 'Right';
-          } else {
+          } else if (minDist == dRight) {
+            // Right edge nearest -> draw nose on right edge => label 'Left'
             nosePosition = 'Left';
-          }
-        } else if (isTemplateInBounds &&
-            isTemplateWithInBoundsInTransposedChart) {
-          if (!isBottom) {
+          } else if (minDist == dTop) {
+            // Top edge nearest -> draw nose on top edge => label 'Bottom'
             nosePosition = 'Bottom';
           } else {
+            // Bottom edge nearest -> draw nose on bottom edge => label 'Top'
             nosePosition = 'Top';
+          }
+        } else {
+          if (!isTransposed) {
+            if (!isRight) {
+              nosePosition = 'Right';
+            } else {
+              nosePosition = 'Left';
+            }
+          } else if (isTemplateInBounds &&
+              isTemplateWithInBoundsInTransposedChart) {
+            if (!isBottom) {
+              nosePosition = 'Bottom';
+            } else {
+              nosePosition = 'Top';
+            }
           }
         }
 
-        final Path nosePath = trackballBehavior._nosePath(
-          nosePosition,
-          templateRRect,
-          Offset(xPos, yPos),
-          pointerLength,
-          pointerWidth,
-        );
+        if (pointerLength > 0 && pointerWidth > 0) {
+          final Path nosePath = trackballBehavior._nosePath(
+            nosePosition,
+            templateRRect,
+            Offset(xPos, yPos),
+            pointerLength,
+            pointerWidth,
+          );
 
-        if (isTemplateInBounds) {
-          context.canvas.drawPath(nosePath, fillPaint);
-          context.canvas.drawPath(nosePath, strokePaint);
+          if (isTemplateInBounds) {
+            context.canvas.drawPath(nosePath, fillPaint);
+            context.canvas.drawPath(nosePath, strokePaint);
+          }
         }
       }
     }
