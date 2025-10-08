@@ -423,6 +423,12 @@ enum TrackballLineType {
   /// - TrackballLineType.vertical, displays vertical trackball line.
   vertical,
 
+  /// - TrackballLineType.horizontal, displays horizontal trackball line.
+  horizontal,
+
+  /// - TrackballLineType.both, displays both vertical and horizontal lines.
+  both,
+
   /// - TrackballLineType.none, will not display trackball line.
   none,
 }

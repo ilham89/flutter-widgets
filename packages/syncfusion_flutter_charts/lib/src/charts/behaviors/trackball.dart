@@ -1279,14 +1279,10 @@ class TrackballBehavior extends ChartBehavior {
       arrowLength,
       arrowWidth,
     );
-    if (arrowLength > 0 && arrowWidth > 0) {
-      final Path nearestTooltipPath = Path()
-        ..addRRect(tooltipRRect)
-        ..addPath(nosePath, Offset.zero);
-      _tooltipPaths.add(nearestTooltipPath);
-    } else {
-      _tooltipPaths.add(Path()..addRRect(tooltipRRect));
-    }
+    final Path nearestTooltipPath = Path()
+      ..addRRect(tooltipRRect)
+      ..addPath(nosePath, Offset.zero);
+    _tooltipPaths.add(nearestTooltipPath);
 
     if (tooltipSettings.canShowMarker) {
       final Offset markerPosition = _markerPosition(
@@ -1413,14 +1409,10 @@ class TrackballBehavior extends ChartBehavior {
       arrowLength,
       arrowWidth,
     );
-    if (arrowLength > 0 && arrowWidth > 0) {
-      final Path nearestTooltipPath = Path()
-        ..addRRect(tooltipRRect)
-        ..addPath(nosePath, Offset.zero);
-      _tooltipPaths.add(nearestTooltipPath);
-    } else {
-      _tooltipPaths.add(Path()..addRRect(tooltipRRect));
-    }
+    final Path nearestTooltipPath = Path()
+      ..addRRect(tooltipRRect)
+      ..addPath(nosePath, Offset.zero);
+    _tooltipPaths.add(nearestTooltipPath);
 
     if (tooltipSettings.canShowMarker) {
       final Offset markerPosition = _markerPosition(
@@ -2076,7 +2068,9 @@ class TrackballBehavior extends ChartBehavior {
 
     // Custom behavior: center tooltip on the track line.
     if (centerTooltipOnTrackLine) {
-      final double safe = tooltipVerticalSafeArea > 0 ? tooltipVerticalSafeArea : 16.0;
+      final double safe = tooltipVerticalSafeArea > 0
+          ? tooltipVerticalSafeArea
+          : 16.0;
       if (_isTransposed) {
         // For transposed charts, center vertically on the horizontal track line
         // and place left/right dynamically based on space.
@@ -2772,19 +2766,35 @@ class TrackballBehavior extends ChartBehavior {
     }
 
     final Rect plotAreaBounds = parentBox!.paintBounds;
-    final Path path = Path();
+    final double x = chartPointInfo[0].xPosition!;
+    final double y = chartPointInfo[0].yPosition!;
+
+    bool drawVertical =
+        lineType == TrackballLineType.vertical ||
+        lineType == TrackballLineType.both;
+    bool drawHorizontal =
+        lineType == TrackballLineType.horizontal ||
+        lineType == TrackballLineType.both;
+
     if (_isTransposed) {
-      final double y = chartPointInfo[0].yPosition!;
-      path
-        ..moveTo(plotAreaBounds.left, y)
-        ..lineTo(plotAreaBounds.right, y);
-    } else {
-      final double x = chartPointInfo[0].xPosition!;
-      path
+      final bool temp = drawVertical;
+      drawVertical = drawHorizontal;
+      drawHorizontal = temp;
+    }
+
+    if (drawVertical) {
+      final Path verticalPath = Path()
         ..moveTo(x, plotAreaBounds.top)
         ..lineTo(x, plotAreaBounds.bottom);
+      drawDashes(context.canvas, dashArray, paint, path: verticalPath);
     }
-    drawDashes(context.canvas, dashArray, paint, path: path);
+
+    if (drawHorizontal) {
+      final Path horizontalPath = Path()
+        ..moveTo(plotAreaBounds.left, y)
+        ..lineTo(plotAreaBounds.right, y);
+      drawDashes(context.canvas, dashArray, paint, path: horizontalPath);
+    }
   }
 
   void _drawLabel(
@@ -3165,10 +3175,9 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
         final bool centerOnLine = trackballBehavior.centerTooltipOnTrackLine;
 
         if (centerOnLine && !isGroupAllPoints && !isTransposed) {
-          final double safe =
-              trackballBehavior.tooltipVerticalSafeArea > 0
-                  ? trackballBehavior.tooltipVerticalSafeArea
-                  : 16.0;
+          final double safe = trackballBehavior.tooltipVerticalSafeArea > 0
+              ? trackballBehavior.tooltipVerticalSafeArea
+              : 16.0;
           // Try centered placement first.
           final double centeredLeft = xPos - templateHalfWidth;
           final bool fitsCentered =
@@ -3208,20 +3217,26 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
           } else {
             // Fallback: show left/right of the line, vertically centered.
             double left;
-            if (xPos + padding + markerHalfWidth + templateFullWidth <=
-                boundaryRight) {
-              left = xPos + padding + markerHalfWidth;
-            } else {
+            // Check if trackball is in right half of chart
+            final double chartCenter = (boundaryLeft + boundaryRight) / 2;
+            final bool isInRightHalf = xPos >= chartCenter;
+
+            if (isInRightHalf) {
+              // Tooltip on LEFT side
               left = xPos - templateFullWidth - padding - markerHalfWidth;
               if (left < boundaryLeft) {
                 left = boundaryLeft;
               }
+            } else {
+              // Tooltip on RIGHT side
+              left = xPos + padding + markerHalfWidth;
             }
 
             double top = yPos - templateHalfHeight; // center with dot
             if (top < (plotAreaBounds.top - safe)) {
               top = plotAreaBounds.top - safe;
-            } else if (top + templateFullHeight > (plotAreaBounds.bottom + safe)) {
+            } else if (top + templateFullHeight >
+                (plotAreaBounds.bottom + safe)) {
               top = plotAreaBounds.bottom + safe - templateFullHeight;
             }
 
@@ -3300,10 +3315,16 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
           }
 
           if (!isTransposed) {
-            if (left + templateFullWidth > totalWidth) {
+            // Check if trackball is in right half of chart
+            final double chartCenter = (boundaryLeft + boundaryRight) / 2;
+            final bool isInRightHalf = xPos >= chartCenter;
+
+            if (isInRightHalf) {
+              // Tooltip on LEFT side
               isRight = true;
               left = xPos - templateFullWidth - pointerLength - markerHalfWidth;
             } else {
+              // Tooltip on RIGHT side
               isRight = false;
             }
           } else {
@@ -3507,10 +3528,9 @@ class TrackballBuilderRenderBox extends RenderShiftedBox {
     // tooltip can extend beyond plot area when needed (top/bottom edges).
     // Apply a small default (16) when not provided to avoid hiding template
     // near edges when centerTooltipOnTrackLine is used without explicit safe area.
-    final double safe =
-        trackballBehavior.tooltipVerticalSafeArea > 0
-            ? trackballBehavior.tooltipVerticalSafeArea
-            : 16.0;
+    final double safe = trackballBehavior.tooltipVerticalSafeArea > 0
+        ? trackballBehavior.tooltipVerticalSafeArea
+        : 16.0;
     final Rect axisBounds = Rect.fromLTRB(
       padding + plotAreaBounds.left,
       triplePadding + plotAreaBounds.top - safe,
